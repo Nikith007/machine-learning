@@ -1,0 +1,186 @@
+import pandas as pd
+
+def find_s(training_data):
+    data_list = training_data.values.tolist()
+    hypothesis = None
+    for instance in data_list:
+        if instance[-1] == 'Yes':  
+            hypothesis = instance[:-1]
+            break
+
+    if hypothesis is None:
+        return None
+    for instance in data_list:
+        if instance[-1] == 'Yes':
+            for i in range(len(hypothesis)):
+                if instance[i] != hypothesis[i]:
+                    hypothesis[i] = '?'
+
+    return hypothesis
+
+def main():
+    file_path = r'C:\Users\Welcome\OneDrive\Documents\training.csv'
+    training_data = pd.read_csv(file_path)
+
+    most_specific_hypothesis = find_s(training_data)
+
+    if most_specific_hypothesis:
+        print("Most Specific Hypothesis:")
+        for attr, value in zip(training_data.columns[:-1], most_specific_hypothesis):
+            print(f"{attr}: {value}")
+    else:
+        print("No hypothesis found (no positive examples in the dataset).")
+
+if __name__ == "__main__":
+    main()
+ 59 changes: 59 additions & 0 deletions59  
+2 program.py
+Original file line number	Diff line number	Diff line change
+@@ -0,0 +1,59 @@
+import pandas as pd
+
+def generalize_S(s, h):
+    return ['?' if s[i] != h[i] else s[i] for i in range(len(s))]
+
+def specialize_G(g, h, domains):
+    result = []
+    for i in range(len(g)):
+        if g[i] == '?':
+            for val in domains[i]:
+                if val != h[i]:
+                    g_new = g.copy()
+                    g_new[i] = val
+                    result.append(g_new)
+    return result
+
+def candidate_elimination(examples):
+    domains = []
+    for attr in examples.columns[:-1]:
+        domains.append(list(examples[attr].unique()))
+
+    G = [['?' for _ in range(len(examples.columns) - 1)]]
+    S = ['0' for _ in range(len(examples.columns) - 1)]
+
+    for _, example in examples.iterrows():
+        example = example.tolist()
+        if example[-1] == 'Yes':
+            G = [g for g in G if all(g[i] == '?' or g[i] == example[i] for i in range(len(example) - 1))]
+            S = generalize_S(S, example)
+        elif example[-1] == 'No':
+            S = S
+            G = [g for g in G if g != ['?' for _ in range(len(example) - 1)]]
+            for g in G.copy():
+                if all(g[i] == '?' or g[i] == example[i] for i in range(len(example) - 1)):
+                    G.remove(g)
+                    G.extend(specialize_G(g, example, domains))
+
+        G = [g for g in G if any(all(s != '0' and (s == '?' or s == g[i]) for i, s in enumerate(S)))]
+        S = [s if s != '0' and any(g[i] == '?' or g[i] == s for g in G) else '0' for i, s in enumerate(S)]
+
+        print(f"For Example {example}:")
+        print("G:", G)
+        print("S:", S)
+        print()
+
+    return G, S
+
+def main():
+    file_path = r'C:\Users\Welcome\OneDrive\Documents\training.csv'
+    training_data = pd.read_csv(file_path)
+
+    G, S = candidate_elimination(training_data)
+
+    print("Final Version Space:")
+    print("G:", G)
+    print("S:", S)
+
+if __name__ == "__main__":
+    main()
+ 84 changes: 84 additions & 0 deletions84  
+3 program.py
+Original file line number	Diff line number	Diff line change
+@@ -0,0 +1,84 @@
+import pandas as pd
+import numpy as np
+from collections import Counter
+
+class Node:
+    def __init__(self, attribute=None, label=None, branches=None):
+        self.attribute = attribute
+        self.label = label
+        self.branches = branches or {}
+
+def entropy(y):
+    counts = Counter(y)
+    probabilities = [count / len(y) for count in counts.values()]
+    return -sum(p * np.log2(p) for p in probabilities if p > 0)
+
+def information_gain(X, y, attribute):
+    total_entropy = entropy(y)
+    weighted_entropy = 0
+    for value in X[attribute].unique():
+        subset = y[X[attribute] == value]
+        weighted_entropy += len(subset) / len(y) * entropy(subset)
+    return total_entropy - weighted_entropy
+
+def id3(X, y, attributes):
+    if len(set(y)) == 1:
+        return Node(label=y.iloc[0])
+
+    if len(attributes) == 0:
+        return Node(label=Counter(y).most_common(1)[0][0])
+
+    gains = {attr: information_gain(X, y, attr) for attr in attributes}
+    best_attribute = max(gains, key=gains.get)
+
+    node = Node(attribute=best_attribute)
+
+    for value in X[best_attribute].unique():
+        subset_X = X[X[best_attribute] == value].drop(best_attribute, axis=1)
+        subset_y = y[X[best_attribute] == value]
+        new_attributes = [attr for attr in attributes if attr != best_attribute]
+
+        if len(subset_y) == 0:
+            node.branches[value] = Node(label=Counter(y).most_common(1)[0][0])
+        else:
+            node.branches[value] = id3(subset_X, subset_y, new_attributes)
+
+    return node
+
+def predict(node, instance):
+    if node.label is not None:
+        return node.label
+    value = instance[node.attribute]
+    if value not in node.branches:
+        return max(Counter(node.branches.values()).items(), key=lambda x: x[1])[0]
+    return predict(node.branches[value], instance)
+
+def print_tree(node, indent=""):
+    if node.label is not None:
+        print(f"{indent}Leaf: {node.label}")
+    else:
+        print(f"{indent}{node.attribute}")
+        for value, child in node.branches.items():
+            print(f"{indent}  {value} ->")
+            print_tree(child, indent + "    ")
+
+data = pd.read_csv(r"C:\Users\Welcome\OneDrive\Documents\decisiontree.csv")
+X = data.drop('Play', axis=1)
+y = data['Play']
+
+attributes = list(X.columns)
+tree = id3(X, y, attributes)
+
+print("Decision Tree:")
+print_tree(tree)
+
+new_sample = pd.Series({
+    'Outlook': 'Sunny',
+    'Temperature': 'Cool',
+    'Humidity': 'High',
+    'Wind': 'Strong'
+})
+
+prediction = predict(tree, new_sample)
+print("\nNew sample:", new_sample.to_dict())
+print("Prediction:", prediction)
